@@ -34,7 +34,13 @@ class AutoCorrTask(object):
         self.complex_deepmd_prefix  = self.jdata.get("complex_deepmd_prefix", "complex_deepmd")
         self.prefix                 = os.path.abspath(self.jdata["system_prefix"])
         self.task_path              = os.path.abspath(self.jdata["task_path"])
-        self.systems                = self.jdata["systems"]
+
+        if isinstance(self.jdata["systems"], list):
+            self.systems = self.jdata["systems"]
+        elif isinstance(self.jdata["systems"], str):
+            self.systems = list(np.loadtxt(self.jdata["systems"], dtype=str))
+        else:
+            raise RuntimeError("Invalid systems: {}".format(self.jdata["systems"]))
 
         # make mdp
         self.make_mdp()
@@ -70,6 +76,7 @@ class AutoCorrTask(object):
         self.end       = self.analysis.get("end", self.mdp["nsteps"] // self.mdp["nstenergy"] + 1)
         self.res       = {}
         self.save_corr = self.analysis.get("save_corr", "corr.csv")
+        self.exclusions = self.analysis.get("exclusions", [])
         if not os.path.isabs(self.save_corr):
             self.save_corr = os.path.join(self.task_path, self.save_corr)
         
@@ -99,25 +106,27 @@ class AutoCorrTask(object):
         gmx_cmd    = self.mdata.get("gmx_command", "gmx")
 
         md_cmd = f"{gmx_cmd} grompp -c npt.gro -f md.mdp -p processed.top -o md.tpr"
-        md_cmd += f" && {gmx_cmd} mdrun -deffnm md"
+        md_cmd += f" && {gmx_cmd} mdrun -deffnm md -cpi"
         md_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f md.edr -o md_ener.xvg'
-        md_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f md.trr -s em.tpr -o md_traj.gro -pbc mol -center -ur compact'
+        md_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f md.xtc -s em.tpr -o md_traj.gro -pbc mol -center -ur compact'
 
         deepmd_cmd = "export GMX_DEEPMD_INPUT_JSON=input.json"
         deepmd_cmd += f" && {gmx_cmd} grompp -c npt.gro -f md.mdp -p processed.top -o deepmd.tpr"
-        deepmd_cmd += f" && {gmx_cmd} mdrun -deffnm deepmd"
+        deepmd_cmd += f" && {gmx_cmd} mdrun -deffnm deepmd -cpi"
         deepmd_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f deepmd.edr -o deepmd_ener.xvg'
-        deepmd_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f deepmd.trr -s em.tpr -o deepmd_traj.gro -pbc mol -center -ur compact'
+        deepmd_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f deepmd.xtc -s em.tpr -o deepmd_traj.gro -pbc mol -center -ur compact'
 
         self.md_cmd = md_cmd
         self.deepmd_cmd = deepmd_cmd
 
-        md_rerun_cmd = f"{gmx_cmd} mdrun -s md.tpr -rerun deepmd.trr -e md_rerun.edr -g md_rerun.log"
+        md_rerun_cmd = f"{gmx_cmd} mdrun -s md.tpr -rerun deepmd.xtc -e md_rerun.edr -g md_rerun.log"
         md_rerun_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f md_rerun.edr -o md_rerun_ener.xvg'
+        md_rerun_cmd += " && rm -rf traj.*"
 
         deepmd_rerun_cmd = "export GMX_DEEPMD_INPUT_JSON=input.json"
-        deepmd_rerun_cmd += f" && {gmx_cmd} mdrun -s deepmd.tpr -rerun md.trr -e deepmd_rerun.edr -g deepmd_rerun.log"
+        deepmd_rerun_cmd += f" && {gmx_cmd} mdrun -s deepmd.tpr -rerun md.xtc -e deepmd_rerun.edr -g deepmd_rerun.log"
         deepmd_rerun_cmd += f' && echo -e "Potential\n" | {gmx_cmd} energy -f deepmd_rerun.edr -o deepmd_rerun_ener.xvg'
+        md_rerun_cmd += " && rm -rf traj.*"
 
         self.md_rerun_cmd = md_rerun_cmd
         self.deepmd_rerun_cmd = deepmd_rerun_cmd
@@ -144,15 +153,15 @@ class AutoCorrTask(object):
             
         if self.reuse_solvated_md:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md.trr"),
-                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.trr"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md.xtc"),
+                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.xtc"))
                 os.symlink(os.path.join(self.reuse_solvated_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.solvated_md_prefix, ss, "md_ener.xvg"))
         
         if self.reuse_complex_md:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_complex_md, ss, "md.trr"),
-                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md.trr"))
+                os.symlink(os.path.join(self.reuse_complex_md, ss, "md.xtc"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md.xtc"))
                 os.symlink(os.path.join(self.reuse_complex_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "md_ener.xvg"))
         
@@ -194,14 +203,14 @@ class AutoCorrTask(object):
     def prepare_rerun(self):
         print("Preparing rerun...")
         for ss in self.systems:
-            os.symlink(os.path.join(self.task_path, self.solvated_md_prefix,     ss, "md.trr"),
-                       os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "md.trr"))
-            os.symlink(os.path.join(self.task_path, self.complex_md_prefix,      ss, "md.trr"),
-                       os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "md.trr"))
-            os.symlink(os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.trr"),
-                       os.path.join(self.task_path, self.solvated_md_prefix,     ss, "deepmd.trr"))
-            os.symlink(os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "deepmd.trr"),
-                       os.path.join(self.task_path, self.complex_md_prefix,      ss, "deepmd.trr"))
+            os.symlink(os.path.join(self.task_path, self.solvated_md_prefix,     ss, "md.xtc"),
+                       os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "md.xtc"))
+            os.symlink(os.path.join(self.task_path, self.complex_md_prefix,      ss, "md.xtc"),
+                       os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "md.xtc"))
+            os.symlink(os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.xtc"),
+                       os.path.join(self.task_path, self.solvated_md_prefix,     ss, "deepmd.xtc"))
+            os.symlink(os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "deepmd.xtc"),
+                       os.path.join(self.task_path, self.complex_md_prefix,      ss, "deepmd.xtc"))
         
         with open(self.record_file, 'a') as f:
             f.write(str(PREPARE_RERUN) + "\n")
@@ -274,6 +283,13 @@ class AutoCorrTask(object):
             self.ori_data["corr"] = corrs
             self.ori_data["corr_std"] = corr_stds
             self.ori_data.to_csv(os.path.join(self.task_path, "results.csv"), index=None, float_format="%4f")
+
+            msk = [True for _ in range(self.ori_data.shape[0])]
+            for ii in range(self.ori_data.shape[0]):
+                if self.ori_data["lig_1"][ii] in self.exclusions or self.ori_data["lig_2"][ii] in self.exclusions:
+                    msk[ii] = False
+            self.ori_data = self.ori_data[msk]
+            
             plot_corr(self.ori_data["fep"],
                       self.ori_data["corr"],
                       self.ori_data["std"],

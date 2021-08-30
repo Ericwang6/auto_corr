@@ -54,9 +54,11 @@ class AutoCorrTask(object):
         self.run_tasks   = []
         self.rerun_tasks = []
 
-        # reuse md
+        # reuse
         self.reuse_solvated_md = self.jdata.get("reuse_solvated_md", "")
         self.reuse_complex_md = self.jdata.get("reuse_complex_md", "")
+        self.reuse_solvated_deepmd = self.jdata.get("reuse_solvated_deepmd", "")
+        self.reuse_complex_deepmd = self.jdata.get("reuse_complex_deepmd", "")
 
         # recording
         self.record_file = "record"
@@ -92,6 +94,15 @@ class AutoCorrTask(object):
         self.outpng = self.analysis.get("out_png", "results.png")
         if not os.path.isabs(self.outpng):
             self.outpng = os.path.join(self.task_path, self.outpng)
+        
+        self.save_results = self.analysis.get("save_results", "results.csv")
+        if not os.path.isabs(self.save_results):
+            self.save_results = os.path.join(self.task_path, self.save_results)
+        
+        sim_time = self.analysis.get("sim_time", None)
+        if sim_time is not None:
+            assert isinstance(sim_time, int) or isinstance(sim_time, float)
+            self.sim_time = sim_time
 
 
     def make_mdp(self):
@@ -165,6 +176,34 @@ class AutoCorrTask(object):
                 os.symlink(os.path.join(self.reuse_complex_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "md_ener.xvg"))
         
+        if self.reuse_solvated_deepmd:
+            for ss in self.systems:
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd.xtc"),
+                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.xtc"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd_ener.xvg"),
+                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd_ener.xvg"))
+        
+        if self.reuse_complex_deepmd:
+            for ss in self.systems:
+                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd.xtc"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd.xtc"))
+                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd_ener.xvg"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd_ener.xvg"))
+        
+        if self.reuse_solvated_md and self.reuse_solvated_deepmd:
+            for ss in self.systems:
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md_rerun_ener.xvg"),
+                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md_rerun_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_solvated_deepmd, ss, "deepmd_rerun_ener.xvg"),
+                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd_rerun_ener.xvg"))
+        
+        if self.reuse_complex_md and self.reuse_complex_deepmd:
+            for ss in self.systems:
+                os.symlink(os.path.join(self.reuse_complex_md, ss, "md_rerun_ener.xvg"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md_rerun_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd_rerun_ener.xvg"),
+                           os.path.join(self.task_path, self.complex_deepmd_prefix, ss, "deepmd_rerun_ener.xvg"))
+        
         with open(self.record_file, 'a') as f:
             f.write(str(PREPARE_MD) + "\n")
 
@@ -183,10 +222,16 @@ class AutoCorrTask(object):
                 task = Task(command=self.md_cmd, task_work_path=os.path.join(self.task_path, self.complex_md_prefix, ss))
                 self.run_tasks.append(task)
         
-        # deepmd
-        for pp in [self.solvated_deepmd_prefix, self.complex_deepmd_prefix]:
+        # solvated deepmd
+        if not self.reuse_solvated_deepmd:
             for ss in self.systems:
-                task = Task(command=self.deepmd_cmd, task_work_path=os.path.join(self.task_path, pp, ss))
+                task = Task(command=self.deepmd_cmd, task_work_path=os.path.join(self.task_path, self.solvated_deepmd_prefix, ss))
+                self.run_tasks.append(task)
+        
+        # complex deepmd
+        if not self.reuse_complex_deepmd:
+            for ss in self.systems:
+                task = Task(command=self.deepmd_cmd, task_work_path=os.path.join(self.task_path, self.complex_deepmd_prefix, ss))
                 self.run_tasks.append(task)
 
         submission = Submission(
@@ -282,7 +327,7 @@ class AutoCorrTask(object):
                 corr_stds.append(corr_std)
             self.ori_data["corr"] = corrs
             self.ori_data["corr_std"] = corr_stds
-            self.ori_data.to_csv(os.path.join(self.task_path, "results.csv"), index=None, float_format="%4f")
+            self.ori_data.to_csv(self.save_results, index=None, float_format="%4f")
 
             msk = [True for _ in range(self.ori_data.shape[0])]
             for ii in range(self.ori_data.shape[0]):
@@ -296,7 +341,7 @@ class AutoCorrTask(object):
                       self.ori_data["corr_std"],
                       self.ori_data["exp"],
                       self.outpng,
-                      f"{self.sim_time:.1f}ps",
+                      f"{self.sim_time / 1000:.1f}ns",
                       self.unit)
 
         self.res = pd.DataFrame(self.res)

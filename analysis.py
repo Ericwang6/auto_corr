@@ -24,7 +24,7 @@ def get_energy(lig, md_dir, deepmd_dir):
 
     return ui_ri, uj_rj, uj_ri, ui_rj
 
-def calc_diff_free_energy(energys, zero=0, unit='kcal'):
+def calc_diff_free_energy(energys, zero=0, unit='kcal', add_zero=False):
     ui_ri, uj_rj, uj_ri, ui_rj = energys
     assert ui_ri.size != 0
     assert uj_rj.size != 0
@@ -42,22 +42,36 @@ def calc_diff_free_energy(energys, zero=0, unit='kcal'):
     diff, std = diff*R*T, std*R*T
     if unit == "kcal":
         diff, std = diff * J2cal, std * J2cal
+        zero *= J2cal
+    if add_zero:
+        diff += zero
     return diff, std
 
-def calc_diff_free_energy_block_avg(energys, num_block=5, unit='kcal'):
+def calc_diff_free_energy_block_avg(energys, num_block=5, unit='kcal', add_zero=False):
     n = len(energys[0]) // num_block
     diffs = []
     stds = []
-    for ii in range(num_block):
-        if ii < (num_block - 1):
-            eners = tuple(map(lambda arr: arr[ii * n: (ii+1) * n].copy(), energys))
-        else:
-            eners = tuple(map(lambda arr: arr[ii * n: ].copy(), energys))
-        zero = np.mean(eners[2] - eners[0])
-        diff, std = calc_diff_free_energy(eners, zero=zero, unit=unit)
-        diffs.append(diff)
-        stds.append(std)
-    return np.mean(diffs), np.std(diffs)
+    zero = np.mean(energys[2] - energys[0])
+    if num_block == 1:
+        print("No block average is used...")
+        diff, std = calc_diff_free_energy(energys, zero=zero, unit=unit, add_zero=add_zero)
+        return diff, std
+    else:
+        for ii in range(num_block):
+            if ii < (num_block - 1):
+                eners = tuple(map(lambda arr: arr[ii * n: (ii+1) * n].copy(), energys))
+            else:
+                eners = tuple(map(lambda arr: arr[ii * n: ].copy(), energys))
+            # zero = np.mean(eners[2] - eners[0])
+            diff, std = calc_diff_free_energy(eners, zero=zero, unit=unit, add_zero=add_zero)
+            diffs.append(diff)
+            stds.append(std)
+        return np.mean(diffs), np.std(diffs) 
+    # if unit == 'kcal':
+    #     zero *= J2kcal
+    # if return_zero:
+    #     return np.mean(diffs), np.std(diffs), zero
+    # else:
 
 def rsquared(x, y, degree=1):
     results = {}

@@ -79,6 +79,7 @@ class AutoCorrTask(object):
         self.res       = {}
         self.save_corr = self.analysis.get("save_corr", "corr.csv")
         self.exclusions = self.analysis.get("exclusions", [])
+        self.add_zero  = self.analysis.get("add_zero", False)
         if not os.path.isabs(self.save_corr):
             self.save_corr = os.path.join(self.task_path, self.save_corr)
         
@@ -90,6 +91,8 @@ class AutoCorrTask(object):
             warnings.warn(f"Original data file not exists: {self.ori_data}")
         else:
             self.ori_data = pd.read_csv(self.ori_data)
+            self.ori_data.loc[:, "lig_1"] = [str(l) for l in self.ori_data["lig_1"]]
+            self.ori_data.loc[:, "lig_2"] = [str(l) for l in self.ori_data["lig_2"]]
         
         self.outpng = self.analysis.get("out_png", "results.png")
         if not os.path.isabs(self.outpng):
@@ -119,25 +122,27 @@ class AutoCorrTask(object):
         md_cmd = f"{gmx_cmd} grompp -c npt.gro -f md.mdp -p processed.top -o md.tpr"
         md_cmd += f" && {gmx_cmd} mdrun -deffnm md -cpi"
         md_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f md.edr -o md_ener.xvg'
-        md_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f md.xtc -s em.tpr -o md_traj.gro -pbc mol -center -ur compact'
+        md_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f md.trr -s em.tpr -o md_traj.gro -pbc mol -center -ur compact'
 
         deepmd_cmd = "export GMX_DEEPMD_INPUT_JSON=input.json"
         deepmd_cmd += f" && {gmx_cmd} grompp -c npt.gro -f md.mdp -p processed.top -o deepmd.tpr"
         deepmd_cmd += f" && {gmx_cmd} mdrun -deffnm deepmd -cpi"
         deepmd_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f deepmd.edr -o deepmd_ener.xvg'
-        deepmd_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f deepmd.xtc -s em.tpr -o deepmd_traj.gro -pbc mol -center -ur compact'
+        deepmd_cmd += f' && echo -e "{group_name}\\n{group_name}" | {gmx_cmd} trjconv -f deepmd.trr -s em.tpr -o deepmd_traj.gro -pbc mol -center -ur compact'
 
         self.md_cmd = md_cmd
         self.deepmd_cmd = deepmd_cmd
 
-        md_rerun_cmd = f"{gmx_cmd} mdrun -s md.tpr -rerun deepmd.xtc -e md_rerun.edr -g md_rerun.log"
+        md_rerun_cmd = f"{gmx_cmd} mdrun -s md.tpr -rerun deepmd.trr -e md_rerun.edr -g md_rerun.log"
         md_rerun_cmd += f' && echo -e "Potential\\n" | {gmx_cmd} energy -f md_rerun.edr -o md_rerun_ener.xvg'
         md_rerun_cmd += " && rm -rf traj.*"
+        md_rerun_cmd += r" && rm -rf \#*"
 
         deepmd_rerun_cmd = "export GMX_DEEPMD_INPUT_JSON=input.json"
-        deepmd_rerun_cmd += f" && {gmx_cmd} mdrun -s deepmd.tpr -rerun md.xtc -e deepmd_rerun.edr -g deepmd_rerun.log"
+        deepmd_rerun_cmd += f" && {gmx_cmd} mdrun -s deepmd.tpr -rerun md.trr -e deepmd_rerun.edr -g deepmd_rerun.log"
         deepmd_rerun_cmd += f' && echo -e "Potential\n" | {gmx_cmd} energy -f deepmd_rerun.edr -o deepmd_rerun_ener.xvg'
-        md_rerun_cmd += " && rm -rf traj.*"
+        deepmd_rerun_cmd += " && rm -rf traj.*"
+        deepmd_rerun_cmd += r" && rm -rf \#*"
 
         self.md_rerun_cmd = md_rerun_cmd
         self.deepmd_rerun_cmd = deepmd_rerun_cmd
@@ -164,29 +169,29 @@ class AutoCorrTask(object):
             
         if self.reuse_solvated_md:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md.xtc"),
-                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.xtc"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md.trr"),
+                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.trr"))
                 os.symlink(os.path.join(self.reuse_solvated_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.solvated_md_prefix, ss, "md_ener.xvg"))
         
         if self.reuse_complex_md:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_complex_md, ss, "md.xtc"),
-                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md.xtc"))
+                os.symlink(os.path.join(self.reuse_complex_md, ss, "md.trr"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md.trr"))
                 os.symlink(os.path.join(self.reuse_complex_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "md_ener.xvg"))
         
         if self.reuse_solvated_deepmd:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd.xtc"),
-                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.xtc"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd.trr"),
+                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.trr"))
                 os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd_ener.xvg"),
                            os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd_ener.xvg"))
         
         if self.reuse_complex_deepmd:
             for ss in self.systems:
-                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd.xtc"),
-                           os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd.xtc"))
+                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd.trr"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd.trr"))
                 os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd_ener.xvg"))
         
@@ -248,14 +253,14 @@ class AutoCorrTask(object):
     def prepare_rerun(self):
         print("Preparing rerun...")
         for ss in self.systems:
-            os.symlink(os.path.join(self.task_path, self.solvated_md_prefix,     ss, "md.xtc"),
-                       os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "md.xtc"))
-            os.symlink(os.path.join(self.task_path, self.complex_md_prefix,      ss, "md.xtc"),
-                       os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "md.xtc"))
-            os.symlink(os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.xtc"),
-                       os.path.join(self.task_path, self.solvated_md_prefix,     ss, "deepmd.xtc"))
-            os.symlink(os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "deepmd.xtc"),
-                       os.path.join(self.task_path, self.complex_md_prefix,      ss, "deepmd.xtc"))
+            os.symlink(os.path.join(self.task_path, self.solvated_md_prefix,     ss, "md.trr"),
+                       os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "md.trr"))
+            os.symlink(os.path.join(self.task_path, self.complex_md_prefix,      ss, "md.trr"),
+                       os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "md.trr"))
+            os.symlink(os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.trr"),
+                       os.path.join(self.task_path, self.solvated_md_prefix,     ss, "deepmd.trr"))
+            os.symlink(os.path.join(self.task_path, self.complex_deepmd_prefix,  ss, "deepmd.trr"),
+                       os.path.join(self.task_path, self.complex_md_prefix,      ss, "deepmd.trr"))
         
         with open(self.record_file, 'a') as f:
             f.write(str(PREPARE_RERUN) + "\n")
@@ -286,19 +291,28 @@ class AutoCorrTask(object):
     def analyze(self):
         print("Analyzing...")
         for ss in self.systems:
+            print(ss, end=" ")
             # solvated 
             solvated_md_dir     = os.path.join(self.task_path, self.solvated_md_prefix)
             solvated_deepmd_dir = os.path.join(self.task_path, self.solvated_deepmd_prefix)
             solvated_eners = get_energy(ss, solvated_md_dir, solvated_deepmd_dir)
             solvated_eners = tuple([e[self.start: self.end].copy() for e in solvated_eners])
-            solvated_diff, solvated_std = calc_diff_free_energy_block_avg(solvated_eners, self.num_block, self.unit)
+            # solvated_diff, solvated_std = calc_diff_free_energy_block_avg(solvated_eners, self.num_block, self.unit)
+            solvated_diff, solvated_std = calc_diff_free_energy_block_avg(solvated_eners, 
+                                                                          self.num_block,
+                                                                          self.unit, 
+                                                                          add_zero=self.add_zero)
 
             # complex
             complex_md_dir     = os.path.join(self.task_path, self.complex_md_prefix)
             complex_deepmd_dir = os.path.join(self.task_path, self.complex_deepmd_prefix)
             complex_eners = get_energy(ss, complex_md_dir, complex_deepmd_dir)
             complex_eners = tuple([e[self.start: self.end].copy() for e in complex_eners])
-            complex_diff, complex_std = calc_diff_free_energy_block_avg(complex_eners, self.num_block, self.unit)
+            # complex_diff, complex_std = calc_diff_free_energy_block_avg(complex_eners, self.num_block, self.unit)
+            complex_diff, complex_std = calc_diff_free_energy_block_avg(complex_eners,
+                                                                        self.num_block, 
+                                                                        self.unit,
+                                                                        add_zero=self.add_zero)
 
             self.res[ss] = {
                 "solvated_diff": solvated_diff,
@@ -306,16 +320,17 @@ class AutoCorrTask(object):
                 "complex_diff": complex_diff,
                 "complex_std": complex_std
             }
+            print("finished")
 
         corrs     = []
         corr_stds = []
         if self.ori_data is not None:
             for ii in range(self.ori_data.shape[0]):
-                lig_1   = self.ori_data.iloc[ii, :]["lig_1"]
-                lig_2   = self.ori_data.iloc[ii, :]["lig_2"]
-                exp     = self.ori_data.iloc[ii, :]["exp"]
-                ori     = self.ori_data.iloc[ii, :]["fep"]
-                ori_std = self.ori_data.iloc[ii, :]["std"]
+                lig_1   = str(self.ori_data.loc[ii, "lig_1"])
+                lig_2   = str(self.ori_data.loc[ii, "lig_2"])
+                exp     = float(self.ori_data.loc[ii, "exp"])
+                ori     = float(self.ori_data.loc[ii, "fep"])
+                ori_std = float(self.ori_data.loc[ii, "std"])
                 
                 corr = ori + (self.res[lig_2]["complex_diff"] - self.res[lig_1]["complex_diff"]) - (self.res[lig_2]["solvated_diff"] - self.res[lig_1]["solvated_diff"])
                 corr_std = np.linalg.norm([ori_std,
@@ -345,7 +360,7 @@ class AutoCorrTask(object):
                       self.unit)
 
         self.res = pd.DataFrame(self.res)
-        self.res.to_csv(self.save_corr)
+        self.res.T.to_csv(self.save_corr)
 
         with open(self.record_file, 'a') as f:
             f.write(str(ANALYZE) + "\n")

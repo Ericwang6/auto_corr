@@ -85,7 +85,7 @@ def rsquared(x, y, degree=1):
     results['determination'] = ssreg / sstot
     return results['determination']
 
-def plot_corr(ori, corr, ori_std, corr_std, exp, output, simulation_time="500ps", unit='kcal'):
+def plot_corr(ori, corr, ori_std, corr_std, exp, output, simulation_time="500ps", unit='kcal', mode='ddG'):
     ori_rmse = rmse(exp, ori)
     corr_rmse = rmse(exp, corr)
     ori_r2 = rsquared(exp, ori)
@@ -108,8 +108,12 @@ def plot_corr(ori, corr, ori_std, corr_std, exp, output, simulation_time="500ps"
 
     ax.set_xlim(rmin, rmax)
     ax.set_ylim(rmin, rmax)
-    ax.set_xlabel("$\Delta\Delta G_{\mathrm{exp}}$" + f" ({unit}/mol)")
-    ax.set_ylabel("$\Delta\Delta G_{\mathrm{pred}}$" + f" ({unit}/mol)")
+    if mode == 'ddG':
+        ax.set_xlabel("$\Delta\Delta G_{\mathrm{exp}}$" + f" ({unit}/mol)")
+        ax.set_ylabel("$\Delta\Delta G_{\mathrm{pred}}$" + f" ({unit}/mol)")
+    elif mode == 'dG':
+        ax.set_xlabel("$\Delta G_{\mathrm{exp}}$" + f" ({unit}/mol)")
+        ax.set_ylabel("$\Delta G_{\mathrm{pred}}$" + f" ({unit}/mol)")
     ax.set_title(f"{simulation_time}, RMSE: {ori_rmse:.3f}/{corr_rmse: .3f}, $R^2$: {ori_r2:.2f}/{corr_r2:.2f}")
     ax.legend()
     fig.savefig(output, dpi=300)

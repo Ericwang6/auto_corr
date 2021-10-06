@@ -83,24 +83,44 @@ class AutoCorrTask(object):
         if not os.path.isabs(self.save_corr):
             self.save_corr = os.path.join(self.task_path, self.save_corr)
         
+        # ddG
         self.ori_data = self.analysis.get("ori_data", "results.csv")
         if not os.path.isabs(self.ori_data):
             self.ori_data = os.path.join(self.prefix, self.ori_data)
         if not os.path.isfile(self.ori_data):
             self.ori_data = None
-            warnings.warn(f"Original data file not exists: {self.ori_data}")
+            warnings.warn(f"Original ddG data file not exists: {self.ori_data}")
         else:
             self.ori_data = pd.read_csv(self.ori_data)
             self.ori_data.loc[:, "lig_1"] = [str(l) for l in self.ori_data["lig_1"]]
             self.ori_data.loc[:, "lig_2"] = [str(l) for l in self.ori_data["lig_2"]]
         
+        # dG
+        self.ori_data_dG = self.analysis.get("ori_data_dG", "results_dG.csv")
+        if not os.path.isabs(self.ori_data_dG):
+            self.ori_data_dG = os.path.join(self.prefix, self.ori_data_dG)
+        if not os.path.isfile(self.ori_data_dG):
+            self.ori_data_dG = None
+            warnings.warn(f"Original dG data file not exists: {self.ori_data_dG}")
+        else:
+            self.ori_data_dG = pd.read_csv(self.ori_data_dG)
+            self.ori_data_dG.loc[:, "lig"] = [str(l) for l in self.ori_data_dG["lig"]]
+        
         self.outpng = self.analysis.get("out_png", "results.png")
         if not os.path.isabs(self.outpng):
             self.outpng = os.path.join(self.task_path, self.outpng)
         
+        self.outpng_dG = self.analysis.get("out_png_dG", "results_dG.png")
+        if not os.path.isabs(self.outpng_dG):
+            self.outpng_dG = os.path.join(self.task_path, self.outpng_dG)
+
         self.save_results = self.analysis.get("save_results", "results.csv")
         if not os.path.isabs(self.save_results):
             self.save_results = os.path.join(self.task_path, self.save_results)
+        
+        self.save_results_dG = self.analysis.get("save_results_dG", "results_dG.csv")
+        if not os.path.isabs(self.save_results_dG):
+            self.save_results_dG = os.path.join(self.task_path, self.save_results_dG)
         
         sim_time = self.analysis.get("sim_time", None)
         if sim_time is not None:
@@ -173,6 +193,8 @@ class AutoCorrTask(object):
                            os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.trr"))
                 os.symlink(os.path.join(self.reuse_solvated_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.solvated_md_prefix, ss, "md_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "md.tpr"),
+                           os.path.join(self.task_path, self.solvated_md_prefix, ss, "md.tpr"))
         
         if self.reuse_complex_md:
             for ss in self.systems:
@@ -180,6 +202,8 @@ class AutoCorrTask(object):
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "md.trr"))
                 os.symlink(os.path.join(self.reuse_complex_md, ss, "md_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "md_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_complex_md, ss, "md.tpr"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "md.tpr"))
         
         if self.reuse_solvated_deepmd:
             for ss in self.systems:
@@ -187,6 +211,8 @@ class AutoCorrTask(object):
                            os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.trr"))
                 os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd_ener.xvg"),
                            os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_solvated_md, ss, "deepmd.tpr"),
+                           os.path.join(self.task_path, self.solvated_deepmd_prefix, ss, "deepmd.tpr"))
         
         if self.reuse_complex_deepmd:
             for ss in self.systems:
@@ -194,6 +220,8 @@ class AutoCorrTask(object):
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd.trr"))
                 os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd_ener.xvg"),
                            os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd_ener.xvg"))
+                os.symlink(os.path.join(self.reuse_complex_deepmd, ss, "deepmd.tpr"),
+                           os.path.join(self.task_path, self.complex_md_prefix, ss, "deepmd.tpr"))
         
         if self.reuse_solvated_md and self.reuse_solvated_deepmd:
             for ss in self.systems:
@@ -322,6 +350,7 @@ class AutoCorrTask(object):
             }
             print("finished")
 
+        # ddG
         corrs     = []
         corr_stds = []
         if self.ori_data is not None:
@@ -342,7 +371,9 @@ class AutoCorrTask(object):
                 corr_stds.append(corr_std)
             self.ori_data["corr"] = corrs
             self.ori_data["corr_std"] = corr_stds
-            self.ori_data.to_csv(self.save_results, index=None, float_format="%4f")
+            self.ori_data["ori_err"] = abs(self.ori_data["fep"] - self.ori_data["exp"])
+            self.ori_data["corr_err"] = abs(self.ori_data["corr"] - self.ori_data["exp"])
+            self.ori_data.to_csv(self.save_results, index=None, float_format="%.4f")
 
             msk = [True for _ in range(self.ori_data.shape[0])]
             for ii in range(self.ori_data.shape[0]):
@@ -358,6 +389,39 @@ class AutoCorrTask(object):
                       self.outpng,
                       f"{self.sim_time / 1000:.1f}ns",
                       self.unit)
+        
+        # dG
+        # corrs     = []
+        # corr_stds = []
+        # if self.ori_data_dG is not None:
+        #     for ii in range(self.ori_data_dG.shape[0]):
+        #         lig     = str(self.ori_data_dG.loc[ii, "lig"])
+        #         exp     = float(self.ori_data_dG.loc[ii, "exp"])
+        #         ori     = float(self.ori_data_dG.loc[ii, "fep"])
+        #         ori_std = float(self.ori_data_dG.loc[ii, "std"])
+                
+        #         corr = ori + self.res[lig]["complex_diff"] - self.res[lig]["solvated_diff"]
+        #         corr_std = np.linalg.norm([ori_std,
+        #                                    self.res[lig]["complex_std"],
+        #                                    self.res[lig]["solvated_std"]])
+        #         corrs.append(corr)
+        #         corr_stds.append(corr_std)
+        #     self.ori_data_dG["corr"] = corrs
+        #     self.ori_data_dG["corr_std"] = corr_stds
+        #     self.ori_data_dG.to_csv(self.save_results_dG, index=None, float_format="%.4f")
+
+        #     msk = [lig not in self.exclusions for lig in self.ori_data_dG['lig']]
+        #     self.ori_data_dG = self.ori_data_dG[msk]
+            
+        #     plot_corr(self.ori_data_dG["fep"],
+        #               self.ori_data_dG["corr"],
+        #               self.ori_data_dG["std"],
+        #               self.ori_data_dG["corr_std"],
+        #               self.ori_data_dG["exp"],
+        #               self.outpng_dG,
+        #               f"{self.sim_time / 1000:.1f}ns",
+        #               self.unit,
+        #               mode='dG')
 
         self.res = pd.DataFrame(self.res)
         self.res.T.to_csv(self.save_corr)
